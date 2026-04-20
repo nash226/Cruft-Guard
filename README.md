@@ -62,17 +62,11 @@ Two caveats only matter if you want to go further and actually exercise
    fields. Patch both to the location of your clone:
 
    ```bash
-   # from the repo root
-   python3 -c "
-   import json, pathlib
-   p = pathlib.Path('demo/instance/.cruft.json')
-   d = json.loads(p.read_text())
-   new_path = str(pathlib.Path('demo/template').resolve())
-   d['template'] = new_path
-   d['context']['cookiecutter']['_template'] = new_path
-   p.write_text(json.dumps(d, indent=2) + '\n')
-   "
+   bash demo/setup.sh
    ```
+
+   (Safe to re-run. Rewrites the two path fields to point at this clone's
+   `demo/template` directory.)
 
 Neither step is needed for `run_demo.sh`, the unit tests, or
 `cruft-guard check` / `cruft-guard update` against your own projects.
