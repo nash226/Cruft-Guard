@@ -30,6 +30,9 @@ cruft-guard (1) detecting the leftover `.rej` as a CI gate, then (2) injecting
 inline conflict markers and rolling back the `.cruft.json` hash. See
 [demo/](demo/) for details.
 
+Presenting this to a team? [DEMO.md](DEMO.md) has an 8–10 minute script with
+narration, commands, and anticipated Q&A.
+
 ---
 
 ## If you cloned this repo
