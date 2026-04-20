@@ -32,6 +32,50 @@ inline conflict markers and rolling back the `.cruft.json` hash. See
 
 ---
 
+## If you cloned this repo
+
+`bash demo/run_demo.sh` works out of the box after `pip install -e .` — it doesn't
+invoke `cruft`, it drives cruft-guard's post-processing against an already-staged
+failure state. Nothing else is required to see the before/after output.
+
+Two caveats only matter if you want to go further and actually exercise
+`cruft update` against `demo/instance/`:
+
+1. **`demo/template/` is not a git repo in this clone.** The original
+   template had two commits (A and B) so cruft could track versions, but we
+   flattened it to avoid nested-repo problems on GitHub. To make cruft happy:
+
+   ```bash
+   cd demo/template
+   git init -q && git add -A && git commit -q -m "A"
+   ```
+
+   (You won't get commit B back — it was the "audit logging" update. If you
+   want the full two-commit history, re-create it by hand or just edit
+   `app.py` and commit again.)
+
+2. **`demo/instance/.cruft.json` has an absolute path to the original
+   author's machine** in its `template` and `context.cookiecutter._template`
+   fields. Patch both to the location of your clone:
+
+   ```bash
+   # from the repo root
+   python3 -c "
+   import json, pathlib
+   p = pathlib.Path('demo/instance/.cruft.json')
+   d = json.loads(p.read_text())
+   new_path = str(pathlib.Path('demo/template').resolve())
+   d['template'] = new_path
+   d['context']['cookiecutter']['_template'] = new_path
+   p.write_text(json.dumps(d, indent=2) + '\n')
+   "
+   ```
+
+Neither step is needed for `run_demo.sh`, the unit tests, or
+`cruft-guard check` / `cruft-guard update` against your own projects.
+
+---
+
 ## Repo layout
 
 ```
