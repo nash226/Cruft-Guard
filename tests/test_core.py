@@ -16,6 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cruft_guard.core import (
+    CruftGuardError,
+    assert_cruft_json_usable,
     find_rej_files,
     parse_rej_file,
     inject_conflict_markers,
@@ -197,6 +199,138 @@ def test_source_file_created_if_missing(tmp_path):
     print("✓ missing source file — created with conflict markers")
 
 
+# ── Edge-case tests ───────────────────────────────────────────────────────────
+
+def test_empty_rej_file_is_noop(tmp_path):
+    """An empty .rej file produces zero hunks; source is left untouched and .rej is removed."""
+    source = tmp_path / "ci.yml"
+    source.write_text("steps:\n  - run: pytest\n")
+    rej = tmp_path / "ci.yml.rej"
+    rej.write_text("")
+
+    original = source.read_text()
+    results = process_rej_files(tmp_path)
+
+    assert len(results) == 1
+    assert results[0].injected is True
+    assert source.read_text() == original, "source must be unchanged when .rej is empty"
+    assert not rej.exists(), ".rej should be cleaned up even when empty"
+    print("✓ empty .rej file — clean no-op")
+
+
+def test_malformed_rej_preserves_source(tmp_path):
+    """A .rej missing @@ headers produces no hunks; source file is not corrupted."""
+    source = tmp_path / "app.py"
+    source.write_text("def main():\n    pass\n")
+    rej = tmp_path / "app.py.rej"
+    rej.write_text("this is not a unified diff at all\njust random text\n")
+
+    original = source.read_text()
+    results = process_rej_files(tmp_path)
+
+    assert len(results) == 1
+    assert source.read_text() == original, "malformed .rej must not corrupt source"
+    print("✓ malformed .rej — source preserved, no corruption")
+
+
+def test_binary_source_file_is_refused(tmp_path):
+    """Injecting markers into a binary source file raises CruftGuardError
+    and does not mutate the file."""
+    source = tmp_path / "logo.png"
+    binary_payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 256 + b"\xff\xd8\xff"
+    source.write_bytes(binary_payload)
+    rej = tmp_path / "logo.png.rej"
+    rej.write_text(SAMPLE_REJ)
+
+    results = process_rej_files(tmp_path)
+
+    assert len(results) == 1
+    assert results[0].injected is False
+    assert results[0].error is not None and "binary" in results[0].error.lower()
+    assert source.read_bytes() == binary_payload, "binary file must not be modified"
+    assert rej.exists(), ".rej must not be deleted when injection was refused"
+    print("✓ binary source file — refused with clear error, file untouched")
+
+
+def test_already_injected_source_not_double_injected(tmp_path):
+    """A source file that already contains CRUFT-GUARD markers is not re-injected."""
+    source = tmp_path / "ci.yml"
+    pre_existing = (
+        "steps:\n  - run: pytest\n\n"
+        "<<<<<<< CRUFT-GUARD (hunk 1 — original lines 3-9)\n"
+        "=======\n>>>>>>> TEMPLATE UPDATE\n"
+    )
+    source.write_text(pre_existing)
+    rej = tmp_path / "ci.yml.rej"
+    rej.write_text(SAMPLE_REJ)
+
+    results = process_rej_files(tmp_path)
+
+    assert len(results) == 1
+    assert results[0].injected is False
+    assert results[0].error is not None and "already contains" in results[0].error
+    assert source.read_text() == pre_existing, "source with existing markers must not be mutated"
+    assert rej.exists(), ".rej must not be deleted when injection was refused"
+    print("✓ already-injected source — refused, no double injection")
+
+
+def test_assert_cruft_json_missing(tmp_path):
+    """Boundary helper raises a friendly error when .cruft.json is absent."""
+    try:
+        assert_cruft_json_usable(tmp_path)
+    except CruftGuardError as e:
+        assert "no .cruft.json" in str(e)
+        print("✓ missing .cruft.json — friendly error raised")
+        return
+    raise AssertionError("expected CruftGuardError for missing .cruft.json")
+
+
+def test_assert_cruft_json_malformed(tmp_path):
+    """Boundary helper raises a friendly error when .cruft.json is unparseable."""
+    (tmp_path / ".cruft.json").write_text("{ not json at all")
+    try:
+        assert_cruft_json_usable(tmp_path)
+    except CruftGuardError as e:
+        assert "could not parse" in str(e)
+        print("✓ malformed .cruft.json — friendly error raised")
+        return
+    raise AssertionError("expected CruftGuardError for malformed .cruft.json")
+
+
+def test_assert_cruft_json_missing_commit_key(tmp_path):
+    """Boundary helper raises a friendly error when .cruft.json lacks `commit`."""
+    (tmp_path / ".cruft.json").write_text(json.dumps({"template": "foo"}))
+    try:
+        assert_cruft_json_usable(tmp_path)
+    except CruftGuardError as e:
+        assert "commit" in str(e)
+        print("✓ .cruft.json without commit key — friendly error raised")
+        return
+    raise AssertionError("expected CruftGuardError for missing commit key")
+
+
+def test_dry_run_leaves_filesystem_untouched(tmp_path):
+    """guard_update(dry_run=True) must not modify source, delete .rej, or rewrite .cruft.json."""
+    cruft_json = tmp_path / ".cruft.json"
+    make_cruft_json(cruft_json, commit="advanced_hash")
+    source = tmp_path / "ci.yml"
+    source.write_text("steps:\n  - run: pytest\n")
+    rej = tmp_path / "ci.yml.rej"
+    rej.write_text(SAMPLE_REJ)
+
+    pre_source = source.read_text()
+    pre_cruft_json = cruft_json.read_text()
+
+    result = guard_update(tmp_path, extra_args=[], dry_run=True)
+
+    assert result.dry_run is True
+    assert result.conflicts, "dry-run must still report conflicts"
+    assert source.read_text() == pre_source, "dry-run must not touch source file"
+    assert rej.exists(), "dry-run must not delete .rej file"
+    assert cruft_json.read_text() == pre_cruft_json, "dry-run must not rewrite .cruft.json"
+    print("✓ dry-run — no filesystem mutations, conflicts still reported")
+
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -211,6 +345,15 @@ if __name__ == "__main__":
         test_hash_rollback_on_conflict,
         test_clean_update_no_rollback,
         test_source_file_created_if_missing,
+        # edge cases
+        test_empty_rej_file_is_noop,
+        test_malformed_rej_preserves_source,
+        test_binary_source_file_is_refused,
+        test_already_injected_source_not_double_injected,
+        test_assert_cruft_json_missing,
+        test_assert_cruft_json_malformed,
+        test_assert_cruft_json_missing_commit_key,
+        test_dry_run_leaves_filesystem_untouched,
     ]
 
     passed = 0

@@ -5,14 +5,48 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cruft-guard"
 version = "0.1.0"
-description = "A trustworthy wrapper around cruft update — enforces hash integrity and surfaces conflicts inline."
+description = "A trustworthy wrapper around `cruft update` — enforces hash integrity and surfaces conflicts inline."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+authors = [
+    { name = "Nazeer Shaikh" },
+]
+keywords = [
+    "cruft",
+    "cookiecutter",
+    "platform-engineering",
+    "golden-path",
+    "template-drift",
+    "scaffolding",
+    "ci",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Software Distribution",
+]
 dependencies = [
     "click>=8.0",
     "cruft>=2.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nash226/Cruft-Guard"
+Repository = "https://github.com/nash226/Cruft-Guard"
+Issues = "https://github.com/nash226/Cruft-Guard/issues"
 
 [project.scripts]
 cruft-guard = "cruft_guard.cli:cli"
