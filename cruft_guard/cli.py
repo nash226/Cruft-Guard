@@ -6,12 +6,18 @@ CLI entry point for cruft-guard.
 
 from __future__ import annotations
 
+import logging
 import sys
 from pathlib import Path
 
 import click
 
-from .core import guard_update, UpdateResult
+from .core import (
+    CruftGuardError,
+    UpdateResult,
+    assert_cruft_json_usable,
+    guard_update,
+)
 
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -24,13 +30,36 @@ def _bold(s: str)  -> str:  return click.style(s, bold=True)
 def _dim(s: str)   -> str:  return click.style(s, dim=True)
 
 
+# ── Logging setup ─────────────────────────────────────────────────────────────
+
+def _configure_logging(verbose: bool) -> None:
+    """Wire the `cruft_guard` logger to stderr at INFO or DEBUG."""
+    log = logging.getLogger("cruft_guard")
+    log.setLevel(logging.DEBUG if verbose else logging.INFO)
+    if not log.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        log.addHandler(handler)
+
+
+# ── Boundary error helper ─────────────────────────────────────────────────────
+
+def _die(msg: str, code: int = 2) -> None:
+    """Print a friendly error to stderr and exit with `code`."""
+    click.echo(_red(f"✗ {msg}"), err=True)
+    sys.exit(code)
+
+
 # ── Report printer ────────────────────────────────────────────────────────────
 
 def print_report(result: UpdateResult, repo_root: Path) -> None:
     width = 60
     click.echo()
     click.echo(_bold("─" * width))
-    click.echo(_bold("  cruft-guard report"))
+    header = "  cruft-guard report"
+    if result.dry_run:
+        header += _yellow("  [dry-run]")
+    click.echo(_bold(header))
     click.echo(_bold("─" * width))
 
     # Cruft output (dimmed, for context)
@@ -69,9 +98,10 @@ def print_report(result: UpdateResult, repo_root: Path) -> None:
             rel_rej    = c.rej_path.relative_to(repo_root)    if c.rej_path.is_relative_to(repo_root)    else c.rej_path
 
             if c.injected:
+                preview_verb = "would inject" if result.dry_run else "conflict markers injected into source"
                 click.echo(
                     f"    {_red('✗')} {_bold(str(rel_source))}\n"
-                    f"      {_dim(str(rel_rej))} → conflict markers injected into source\n"
+                    f"      {_dim(str(rel_rej))} → {preview_verb}\n"
                     f"      {_yellow('→ resolve the <<<<<<< blocks, then re-run cruft-guard')}"
                 )
             else:
@@ -81,7 +111,12 @@ def print_report(result: UpdateResult, repo_root: Path) -> None:
                 )
             click.echo()
 
-        click.echo(_red("  ✗ .cruft.json hash rolled back — not advanced until conflicts clear."))
+        rollback_msg = (
+            "  ✗ .cruft.json hash would be rolled back — not advanced until conflicts clear."
+            if result.dry_run else
+            "  ✗ .cruft.json hash rolled back — not advanced until conflicts clear."
+        )
+        click.echo(_red(rollback_msg))
         click.echo(_yellow("  → Fix the conflict markers above, then re-run: cruft-guard update"))
 
     click.echo(_bold("─" * width))
@@ -114,8 +149,26 @@ def cli() -> None:
     default=True,
     help="Pass --skip-apply-ask to cruft (non-interactive mode).",
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Preview changes without modifying any files or invoking `cruft update`.",
+)
+@click.option(
+    "-v", "--verbose",
+    is_flag=True,
+    default=False,
+    help="Enable DEBUG-level logging on stderr.",
+)
 @click.argument("cruft_args", nargs=-1)
-def update_cmd(repo: Path, skip_apply_ask: bool, cruft_args: tuple[str, ...]) -> None:
+def update_cmd(
+    repo: Path,
+    skip_apply_ask: bool,
+    dry_run: bool,
+    verbose: bool,
+    cruft_args: tuple[str, ...],
+) -> None:
     """Run cruft update with conflict detection and hash integrity enforcement.
 
     Any additional arguments are forwarded directly to cruft update.
@@ -124,23 +177,33 @@ def update_cmd(repo: Path, skip_apply_ask: bool, cruft_args: tuple[str, ...]) ->
     Examples:
       cruft-guard update
       cruft-guard update --repo ./my-service
-      cruft-guard update -- --skip-apply-ask
+      cruft-guard update --dry-run
+      cruft-guard update -v -- --skip-apply-ask
     """
+    _configure_logging(verbose)
     repo_root = repo.resolve()
-    cruft_json = repo_root / ".cruft.json"
 
-    if not cruft_json.exists():
-        click.echo(_red(f"✗ No .cruft.json found in {repo_root}"), err=True)
-        sys.exit(1)
+    try:
+        assert_cruft_json_usable(repo_root)
+    except CruftGuardError as e:
+        _die(str(e))
 
     extra: list[str] = []
     if skip_apply_ask:
         extra.append("--skip-apply-ask")
     extra.extend(cruft_args)
 
-    click.echo(_bold(f"→ Running cruft update in {repo_root} ..."))
+    prefix = "[dry-run] " if dry_run else ""
+    click.echo(_bold(f"→ {prefix}Running cruft update in {repo_root} ..."))
 
-    result = guard_update(repo_root=repo_root, extra_args=extra)
+    try:
+        result = guard_update(
+            repo_root=repo_root,
+            extra_args=extra,
+            dry_run=dry_run,
+        )
+    except CruftGuardError as e:
+        _die(str(e))
 
     print_report(result, repo_root)
 
@@ -157,7 +220,13 @@ def update_cmd(repo: Path, skip_apply_ask: bool, cruft_args: tuple[str, ...]) ->
     help="Path to the repository root.",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
 )
-def check_cmd(repo: Path) -> None:
+@click.option(
+    "-v", "--verbose",
+    is_flag=True,
+    default=False,
+    help="Enable DEBUG-level logging on stderr.",
+)
+def check_cmd(repo: Path, verbose: bool) -> None:
     """Check for leftover .rej files without running an update.
 
     Useful as a standalone CI gate to catch any .rej files that
@@ -168,6 +237,7 @@ def check_cmd(repo: Path) -> None:
       cruft-guard check
       cruft-guard check --repo ./my-service
     """
+    _configure_logging(verbose)
     from .core import find_rej_files
 
     repo_root = repo.resolve()
