@@ -1,0 +1,13 @@
+{
+  "template": "/Users/nazeershaikh/CruftminiCapstoneProject/cruft prototype/demo/template",
+  "commit": "459b6f460143d9073aad4f2a17bd9ac94f54e165",
+  "checkout": "459b6f460143d9073aad4f2a17bd9ac94f54e165",
+  "context": {
+    "cookiecutter": {
+      "project_name": "my-service",
+      "_template": "/Users/nazeershaikh/CruftminiCapstoneProject/cruft prototype/demo/template",
+      "_commit": "459b6f460143d9073aad4f2a17bd9ac94f54e165"
+    }
+  },
+  "directory": null
+}

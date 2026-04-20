@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cruft-guard"
+version = "0.1.0"
+description = "A trustworthy wrapper around cruft update — enforces hash integrity and surfaces conflicts inline."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "click>=8.0",
+    "cruft>=2.0",
+]
+
+[project.scripts]
+cruft-guard = "cruft_guard.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cruft_guard*"]
